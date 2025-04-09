@@ -40,3 +40,11 @@ class Auth:
         url = urljoin(self.url_prefix, "unregister")
         r = requests.post(url, json=json)
         return r.status_code
+
+    def search_book(self, title='', content='', tag='', store_id='') -> int:
+        json = {"title": title, "content": content, "tag": tag, "store_id":store_id}
+        url = urljoin(self.url_prefix, "search_book")
+        r = requests.post(url, json=json)
+        # if r.status_code == 529:
+        #     return r.status_code, "No matching books found."
+        return r.status_code#, r.json().get("message")
