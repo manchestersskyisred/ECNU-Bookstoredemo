@@ -1,9 +1,10 @@
 import requests
 import threading
+import time
 from urllib.parse import urljoin
 from be import serve
-from be.model.store import init_completed_event
 from fe import conf
+from data import load
 
 thread: threading.Thread = None
 
@@ -19,7 +20,8 @@ def pytest_configure(config):
     print("frontend begin test")
     thread = threading.Thread(target=run_backend)
     thread.start()
-    init_completed_event.wait()
+    load.load_books(conf.Use_Large_DB)
+    time.sleep(3)
 
 
 def pytest_unconfigure(config):

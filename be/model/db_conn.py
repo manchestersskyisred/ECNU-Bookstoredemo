@@ -1,37 +1,30 @@
-from be.model import store
-
+from be.model import database
+import pymongo
 
 class DBConn:
     def __init__(self):
-        self.conn = store.get_db_conn()
+        self.conn = database.get_db_conn()
+        self.conn["user"].create_index([("user_id", pymongo.ASCENDING)])
+        self.conn["user_store"].create_index([("user_id", pymongo.ASCENDING), ("store_id", pymongo.ASCENDING)])
+        self.conn["store"].create_index([("book_id", pymongo.ASCENDING), ("store_id", pymongo.ASCENDING)])
 
     def user_id_exist(self, user_id):
-        cursor = self.conn.execute(
-            "SELECT user_id FROM user WHERE user_id = ?;", (user_id,)
-        )
-        row = cursor.fetchone()
-        if row is None:
+        result = self.conn.user.find_one({"user_id": user_id})
+        if result is None:
             return False
         else:
             return True
 
     def book_id_exist(self, store_id, book_id):
-        cursor = self.conn.execute(
-            "SELECT book_id FROM store WHERE store_id = ? AND book_id = ?;",
-            (store_id, book_id),
-        )
-        row = cursor.fetchone()
-        if row is None:
+        result = self.conn.store.find_one({"store_id": store_id, "book_id": book_id})
+        if result is None:
             return False
         else:
             return True
 
     def store_id_exist(self, store_id):
-        cursor = self.conn.execute(
-            "SELECT store_id FROM user_store WHERE store_id = ?;", (store_id,)
-        )
-        row = cursor.fetchone()
-        if row is None:
+        result = self.conn.user_store.find_one({"store_id": store_id})
+        if result is None:
             return False
         else:
             return True
