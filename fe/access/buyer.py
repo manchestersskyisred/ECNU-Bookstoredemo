@@ -48,3 +48,92 @@ class Buyer:
         headers = {"token": self.token}
         r = requests.post(url, headers=headers, json=json)
         return r.status_code
+
+    def get_order_history(self) -> int:
+        json = {
+            "user_id": self.user_id,
+        }
+        url = urljoin(self.url_prefix, "get_order_history")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    def cancel_order(self, order_id: str) -> int:
+        json = {
+            "user_id": self.user_id,
+            "order_id": order_id,
+        }
+        url = urljoin(self.url_prefix, "cancel_order")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    def receive_order(self, order_id: str) -> int:
+        json = {
+            "user_id": self.user_id,
+            "order_id": order_id,
+        }
+        url = urljoin(self.url_prefix, "receive_order")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+  
+    def collect_book(self, book_id) -> int:
+        json = {
+            "user_id": self.user_id,
+            "book_id": book_id,
+        }
+        url = urljoin(self.url_prefix, "collect_book")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+    
+    def get_collection(self, user_id) -> int:
+        json = {
+            "user_id": self.user_id,
+        }
+        url = urljoin(self.url_prefix, "get_collection")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+    
+    def uncollect_book(self, book_id) -> int:
+        json = {
+            "user_id": self.user_id,
+            "book_id": book_id,
+        }
+        url = urljoin(self.url_prefix, "uncollect_book")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+
+    def collect_store(self, store_id) -> int:
+        json = {
+            "user_id": self.user_id,
+            "store_id": store_id,
+        }
+        url = urljoin(self.url_prefix, "collect_store")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    def get_store_collection(self, user_id) -> int:
+        json = {
+            "user_id": self.user_id,
+        }
+        url = urljoin(self.url_prefix, "get_store_collection")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
+
+    def uncollect_store(self, store_id) -> int:
+        json = {
+            "user_id": self.user_id,
+            "store_id": store_id,
+        }
+        url = urljoin(self.url_prefix, "uncollect_store")
+        headers = {"token": self.token}
+        r = requests.post(url, headers=headers, json=json)
+        return r.status_code
