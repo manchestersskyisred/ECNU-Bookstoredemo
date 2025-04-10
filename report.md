@@ -3,6 +3,205 @@
 ## 成员：
 
 吕佳鸿 肖岂源 柳絮源
+## 概述
+
+本项目采用MongoDB作为文档数据库，为在线书店系统提供高效、灵活的数据存储解决方案。MongoDB的文档模型非常适合存储结构复杂、关联灵活的商业数据，非常符合电子商务应用的需求。
+
+![alt text](网上书店.png)
+
+## 数据库连接设计
+
+系统通过`database.py`建立与MongoDB的连接：
+
+```python
+class MongoDB_client:
+    def __init__(self):
+        self.socket = pymongo.MongoClient(uri, server_api=pymongo.server_api.ServerApi('1'))
+        self.check_and_delete_database('bookstore')
+        self.database = self.socket['bookstore']
+```
+
+## 集合(Collection)设计
+
+### 1. user集合
+
+存储用户信息，包括买家和卖家。
+
+**Schema结构**:
+```javascript
+{
+  "user_id": String,         // 用户唯一标识
+  "password": String,        // 用户密码
+  "balance": Number,         // 账户余额
+  "token": String,           // JWT授权令牌
+  "terminal": String,        // 登录设备标识
+  "created_at": Number,      // 账户创建时间戳
+  "last_login": Number,      // 最后登录时间戳(可选)
+  "logout_time": Number      // 登出时间戳(可选)
+}
+```
+
+**索引**:
+```javascript
+{ "user_id": 1 }  // 升序索引，提高查询效率
+```
+
+### 2. user_store集合
+
+存储商店与用户(卖家)的关联信息。
+
+**Schema结构**:
+```javascript
+{
+  "store_id": String,        // 商店唯一标识
+  "user_id": String,         // 店主用户ID
+  "status": String,          // 商店状态(active/inactive)
+  "created_at": Number       // 创建时间戳
+}
+```
+
+**索引**:
+```javascript
+{ "user_id": 1, "store_id": 1 }  // 复合索引
+```
+
+### 3. store集合
+
+存储商店中的图书库存信息。
+
+**Schema结构**:
+```javascript
+{
+  "book_id": String,         // 图书唯一标识
+  "store_id": String,        // 所属商店ID
+  "book_info": String,       // 图书详细信息(JSON字符串)
+  "stock_level": Number,     // 库存数量
+  "created_at": Number,      // 创建时间戳
+  "updated_at": Number       // 更新时间戳
+}
+```
+
+**索引**:
+```javascript
+{ "book_id": 1, "store_id": 1 }  // 复合索引，提高查询和库存操作效率
+```
+
+### 4. new_order集合
+
+存储新创建的订单信息(临时状态)。
+
+**Schema结构**:
+```javascript
+{
+  "order_id": String,        // 订单唯一标识
+  "user_id": String,         // 购买者用户ID
+  "store_id": String         // 商店ID
+}
+```
+
+### 5. new_order_detail集合
+
+存储新订单的详细商品信息(临时状态)。
+
+**Schema结构**:
+```javascript
+{
+  "order_id": String,        // 订单ID
+  "book_id": String,         // 图书ID
+  "count": Number,           // 购买数量
+  "price": Number            // 商品总价
+}
+```
+
+### 6. order_history集合
+
+存储订单历史记录。
+
+**Schema结构**:
+```javascript
+{
+  "order_id": String,        // 订单唯一标识
+  "user_id": String,         // 购买者用户ID
+  "store_id": String,        // 商店ID
+  "status": String,          // 订单状态(pending/paid/shipped/received/cancelled)
+  "created_at": Number,      // 创建时间戳
+  "paid_at": Number,         // 支付时间戳(可选)
+  "shipped_at": Number       // 发货时间戳(可选)
+}
+```
+
+### 7. order_history_detail集合
+
+存储订单历史的详细商品信息。
+
+**Schema结构**:
+```javascript
+{
+  "order_id": String,        // 订单ID
+  "book_id": String,         // 图书ID
+  "count": Number,           // 购买数量
+  "price": Number            // 商品总价
+}
+```
+
+## 聚合查询设计
+
+系统使用MongoDB的聚合查询功能获取复杂的数据关联，例如在`get_order_history`函数中：
+
+```python
+pipeline = [
+    {"$match": {"user_id": user_id}},
+    {"$lookup": {
+        "from": "order_history_detail",
+        "localField": "order_id",
+        "foreignField": "order_id",
+        "as": "items"
+    }}
+]
+```
+
+此查询使用`$lookup`操作符实现了类似SQL JOIN的功能，将订单与订单详情关联起来。
+
+## 数据完整性保障
+
+尽管MongoDB是非关系型数据库，本系统依然通过应用程序逻辑实现了数据完整性保障：
+
+1. **事务管理**：如在`new_order`和`payment`函数中，确保库存更新、订单创建和资金转移的原子性。
+
+2. **库存管理**：通过`$inc`和`$gte`条件操作符确保库存不会出现负数。
+
+3. **状态跟踪**：通过订单状态字段跟踪订单全生命周期。
+
+## 扩展功能集合
+
+根据项目代码，系统可能还实现了以下功能相关的集合(从代码中可以推断)：
+
+### 用户收藏功能
+
+可能存在用于存储用户收藏信息的集合，如：
+```javascript
+// user_collection集合
+{
+  "user_id": String,        // 用户ID
+  "book_id": String,        // 收藏的图书ID
+  "collected_at": Number    // 收藏时间戳
+}
+
+// user_store_collection集合
+{
+  "user_id": String,        // 用户ID
+  "store_id": String,       // 收藏的商店ID
+  "collected_at": Number    // 收藏时间戳
+}
+```
+
+## 性能优化设计
+
+1. **索引策略**：对频繁查询的字段创建了索引，如`user_id`、`book_id`和`store_id`。
+
+2. **文档结构**：采用合理的嵌套结构和引用，避免过度嵌套导致的性能问题。
+
+3. **时间戳记录**：所有关键操作都记录时间戳，便于数据分析和业务追踪。
 
 ## 一. 后端核心逻辑 (`/be/model`) - 我们系统的大脑
 
