@@ -1032,6 +1032,42 @@ class BookDB:
     
     另外，把 **封面图片转成 Base64** 放在 `Book` 对象里，传送给前端或者显示都非常便捷。我们还以书的 ID 添加了数据库 **索引**，这能 **大大提升查找速度**。
 
+### **4. `/fe/access/new_seller.py` 和 `/fe/access/new_buyer.py`：新用户（卖家/买家）注册与初始化**
+
+*   **主要功能介绍**
+
+    这两个脚本扮演着 **新用户快速入口** 的角色，分别用于 **注册新卖家** 和 **新买家**。它们的核心功能是提供一个便捷的函数 (`register_new_seller` 和 `register_new_buyer`)，接收用户期望的 `user_id` 和 `password`。函数内部首先会利用共享的 `Auth` 模块（连接到由 `conf.URL` 指定的后端认证服务）来完成用户的实际注册过程。一旦认证服务确认注册成功（通过检查返回的状态码是否为 200），脚本会紧接着 **创建并返回** 一个对应类型的用户实例（`Seller` 或 `Buyer`）。这个返回的对象不仅代表了刚刚注册成功的用户，而且已经包含了必要的认证信息（`user_id`, `password`, 和服务 `URL`），可以 **立即用于** 后续的操作，比如卖家上架商品或买家浏览下单。可以认为，这两个脚本封装了“注册”和“获取可用用户对象”这两个步骤，提供了一个 **一站式** 的新用户创建体验。
+
+*   **核心代码实现**
+
+```python
+# /fe/access/new_seller.py
+from fe import conf 
+from fe.access import seller, auth
+
+def register_new_seller(user_id, password) -> seller.Seller:
+    a = auth.Auth(conf.URL)
+    code = a.register(user_id, password)
+    assert code == 200 # 确保注册成功
+    s = seller.Seller(conf.URL, user_id, password)
+    return s
+
+# /fe/access/new_buyer.py
+from fe import conf
+from fe.access import buyer, auth
+
+def register_new_buyer(user_id, password) -> buyer.Buyer:
+    a = auth.Auth(conf.URL)
+    code = a.register(user_id, password)
+    assert code == 200 # 确保注册成功
+    s = buyer.Buyer(conf.URL, user_id, password)
+    return s
+```
+
+*   **设计优点**
+
+    这两个脚本的设计 **极大简化了** 新用户的创建流程，将注册和后续用户对象的初始化 **打包成单一函数调用**。它们巧妙地 **隐藏了底层认证交互** 的细节，使得上层调用（尤其是在测试或初始化场景中）更为 **简洁直观**。同时，使用 `assert` 来校验注册结果，确保了只有在用户成功创建后才会返回有效的用户对象，这增强了使用的 **健壮性**，避免了后续操作中因用户不存在或未成功注册而引发的问题。
+
 ## 测试
 
 除了基本的测试之外，我们还自行增加了一些测试来对新开发的功能进行测试，以提高代码覆盖率率。
@@ -1147,38 +1183,22 @@ class BookDB:
 
 项目链接：https://github.com/manchestersskyisred/ECNU-Bookstoredemo
 
-![image-20250410025232424](/Users/kerwinlv/Library/Application Support/typora-user-images/image-20250410025232424.png)
+![1](1.png)
 
-![image-20250410025311598](/Users/kerwinlv/Library/Application Support/typora-user-images/image-20250410025311598.png)
+![2](2.png)
 
 大部分没覆盖到的代码都是一些不会被执行的或者一些异常抛出的代码，为了代码功能的完整和结构的严谨，我们保留了这部分代码
 
 ## 分工&协作
 
-在项目的完成过程中，所有成员相互沟通、通力协作，充分利用git工具完成了本项目的所有工作，其中所有人的工作量分布如下:
+本项目由团队成员紧密协作完成，充分利用 Git 进行版本控制与协同开发。各位成员在负责核心模块开发的同时，积极参与了代码审查、功能测试、BUG修复及报告撰写等工作，具体分工如下：
 
-* 柳絮源: 33.33%贡献
-  * 附加功能开发
-    * 图书搜索接口
-  * 附加功能测试
-  * BUG 修复
-  * 报告撰写
-* 吕佳鸿: 33.33%贡献
-  * 基础功能开发（全部基础接口）
-  * 附加功能开发
-    * 发货/收货接口
-    * 订单操作接口
-  * 代码仓库日常维护
-    * 版本管理
-    * 分支管理
-  * BUG 修复
-  * 报告撰写
-* 肖岂源: 33.33%贡献
-  * 拓展功能开发
-    * 收藏接口
-  * BUG 修复
-  * 报告撰写
+*   **柳絮源 (33.33%):** 负责 **用户管理与认证 (`user.py`)** 模块的增强，主导开发并测试了核心附加功能——**书籍搜索 (`search_book`)**，涵盖后端逻辑、API 设计及前端接口模拟，参与代码仓库的主要维护工作
+*   **吕佳鸿 (33.33%):** 负责 **卖家核心业务逻辑 (`seller.py`)** 的实现（店铺创建、图书上/下架、库存管理），并开发了订单生命周期中的关键环节，如 **订单自动取消、发货与收货** 功能，参与代码仓库的主要维护工作
+*   **肖岂源 (33.33%):** 负责 **买家核心业务逻辑 (`buyer.py`)** 的实现（下单、支付、历史订单、充值），并独立开发完成了 **收藏夹（书籍/店铺）** 功能及其相关接口与测试，参与代码仓库的主要维护工作
+
+所有成员均深度参与了项目各阶段，确保了功能的完整性和代码质量。Git 提交历史（见截图）反映了团队的协作过程。
 
 git使用情况：
 
-![image-20250410030728173](/Users/kerwinlv/Library/Application Support/typora-user-images/image-20250410030728173.png)
+![3](3.png)
