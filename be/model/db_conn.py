@@ -22,6 +22,15 @@ class DBConn:
 
     def store_id_exist(self, store_id):
         with self.conn.cursor() as cur:
+            # 优先检查新表结构
+            cur.execute(
+                'SELECT EXISTS(SELECT 1 FROM store_info WHERE store_id = %s);', (store_id,)
+            )
+            exists_in_new = cur.fetchone()[0]
+            if exists_in_new:
+                return True
+            
+            # 向后兼容：检查旧表结构
             cur.execute(
                 'SELECT EXISTS(SELECT 1 FROM user_store WHERE store_id = %s);', (store_id,)
             )

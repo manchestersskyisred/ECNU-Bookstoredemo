@@ -14,187 +14,177 @@ class Buyer(db_conn.DBConn):
     def new_order(self, user_id: str, store_id: str, id_and_count: [(str, int)]) -> (int, str, str):
         order_id = ""
         try:
-            # 检查user, store是否存在
-            if not self.user_id_exist(user_id):
+            # 验证用户和商店存在性
+            user_exists = self.user_id_exist(user_id)
+            store_exists = self.store_id_exist(store_id)
+            
+            if not user_exists:
                 return error.error_non_exist_user_id(user_id) + (order_id,)
-            if not self.store_id_exist(store_id):
+            if not store_exists:
                 return error.error_non_exist_store_id(store_id) + (order_id,)
 
-            # 生成order ID
-            order_id = "{}_{}_{}".format(user_id, store_id, str(uuid.uuid1()))
+            # 生成唯一订单ID
+            order_id = "{}_{}_{}" .format(user_id, store_id, str(uuid.uuid1()))
 
-            # 事务开始
+            # 开始数据库事务处理
+            order_details = []
             with self.conn:
                 with self.conn.cursor() as cur:
-                    order_details = []
-
+                    # 处理每个商品项目
                     for book_id, count in id_and_count:
-                        # 获取book信息
-                        cur.execute(
-                            "SELECT stock_level, book_info FROM store "
-                            "WHERE store_id = %s AND book_id = %s;",
-                            (store_id, book_id),
-                        )
-                        row = cur.fetchone()
-                        if row is None:
+                        # 查询商品库存和信息
+                        stock_query = "SELECT stock_level, book_info FROM store WHERE store_id = %s AND book_id = %s;"
+                        cur.execute(stock_query, (store_id, book_id))
+                        result = cur.fetchone()
+                        
+                        if result is None:
                             return error.error_non_exist_book_id(book_id) + (order_id,)
                         
-                        stock_level, book_info = row
-                        book_info_json = json.loads(book_info)
-                        price = book_info_json.get("price")
+                        stock_level, book_info = result
+                        book_data = json.loads(book_info)
+                        price = book_data.get("price")
 
-                        # 检查stock level
-                        if stock_level < count:
+                        # 库存检查
+                        if count > stock_level:
                             return error.error_stock_level_low(book_id) + (order_id,)
 
-                        # 更新 stock level
-                        cur.execute(
-                            "UPDATE store SET stock_level = stock_level - %s "
-                            "WHERE store_id = %s AND book_id = %s AND stock_level >= %s",
-                            (count, store_id, book_id, count),
-                        )
+                        # 库存扣减操作
+                        update_stock_sql = ("UPDATE store SET stock_level = stock_level - %s "
+                                           "WHERE store_id = %s AND book_id = %s AND stock_level >= %s")
+                        cur.execute(update_stock_sql, (count, store_id, book_id, count))
+                        
                         if cur.rowcount == 0:
                             return error.error_stock_level_low(book_id) + (order_id,)
 
-                        # 添加 order details
-                        order_details.append({"book_id": book_id, "count": count, "price": price})
+                        # 构建订单详情数据
+                        detail_item = {"book_id": book_id, "count": count, "price": price}
+                        order_details.append(detail_item)
 
-                    # 插入到new_order_detail中
-                    cur.executemany(
-                        "INSERT INTO new_order_detail(order_id, book_id, count, price) "
-                        "VALUES(%s, %s, %s, %s);",
-                        [(order_id, detail["book_id"], detail["count"], detail["price"]) for detail in order_details],
-                    )
+                    # 批量插入订单详情
+                    detail_insert_sql = ("INSERT INTO new_order_detail(order_id, book_id, count, price) "
+                                        "VALUES(%s, %s, %s, %s);")
+                    detail_values = [(order_id, detail["book_id"], detail["count"], detail["price"]) 
+                                   for detail in order_details]
+                    cur.executemany(detail_insert_sql, detail_values)
 
-                    # 插入到new_order中
-                    cur.execute(
-                        "INSERT INTO new_order(order_id, store_id, user_id) "
-                        "VALUES(%s, %s, %s);",
-                        (order_id, store_id, user_id),
-                    )
+                    # 插入主订单记录
+                    order_insert_sql = "INSERT INTO new_order(order_id, store_id, user_id) VALUES(%s, %s, %s);"
+                    cur.execute(order_insert_sql, (order_id, store_id, user_id))
 
-                    # 插入到order_history中
-                    cur.execute(
-                        "INSERT INTO order_history(order_id, user_id, store_id, status) "
-                        "VALUES(%s, %s, %s, %s);",
-                        (order_id, user_id, store_id, "pending"),
-                    )
+                    # 创建订单历史记录
+                    history_insert_sql = ("INSERT INTO order_history(order_id, user_id, store_id, status) "
+                                         "VALUES(%s, %s, %s, %s);")
+                    cur.execute(history_insert_sql, (order_id, user_id, store_id, "pending"))
 
-                    # 插入到order_history_detail中
-                    cur.executemany(
-                        "INSERT INTO order_history_detail(order_id, book_id, count, price) "
-                        "VALUES(%s, %s, %s, %s);",
-                        [(order_id, detail["book_id"], detail["count"], detail["price"]) for detail in order_details],
-                    )
+                    # 插入历史详情记录
+                    history_detail_sql = ("INSERT INTO order_history_detail(order_id, book_id, count, price) "
+                                         "VALUES(%s, %s, %s, %s);")
+                    history_values = [(order_id, detail["book_id"], detail["count"], detail["price"]) 
+                                    for detail in order_details]
+                    cur.executemany(history_detail_sql, history_values)
 
-            # 超时取消的计时器
-            timer = Timer(10.0, self.cancel_order, args=[user_id, order_id])
-            timer.start()
+            # 设置订单超时自动取消
+            timeout_timer = Timer(10.0, self.cancel_order, args=[user_id, order_id])
+            timeout_timer.start()
 
             return 200, "ok", order_id
 
         except psycopg2.Error as e:
-            logging.info("528, {}".format(str(e)))
-            return 528, "{}".format(str(e)), ""
+            error_msg = "{}".format(str(e))
+            logging.info("528, {}".format(error_msg))
+            return 528, error_msg, ""
         except BaseException as e:
-            logging.info("530, {}".format(str(e)))
-            return 530, "{}".format(str(e)), ""
+            error_msg = "{}".format(str(e))
+            logging.info("530, {}".format(error_msg))
+            return 530, error_msg, ""
 
     def payment(self, user_id: str, password: str, order_id: str) -> (int, str):
         try:
-            # 事务开始
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 订单信息
-                    cur.execute(
-                        "SELECT user_id, store_id FROM new_order WHERE order_id = %s;",
-                        (order_id,)
-                    )
-                    order_row = cur.fetchone()
-                    if order_row is None:
+                    # 获取订单基本信息
+                    order_query = "SELECT user_id, store_id FROM new_order WHERE order_id = %s;"
+                    cur.execute(order_query, (order_id,))
+                    order_info = cur.fetchone()
+                    
+                    if order_info is None:
                         return error.error_invalid_order_id(order_id)
 
-                    buyer_id, store_id = order_row
+                    buyer_id, store_id = order_info
 
-                    # 权限
+                    # 验证订单所有权
                     if buyer_id != user_id:
                         return error.error_authorization_fail()
 
-                    # 买家信息
-                    cur.execute(
-                        'SELECT balance, password FROM "user" WHERE user_id = %s;',
-                        (buyer_id,)
-                    )
-                    buyer_row = cur.fetchone()
-                    if buyer_row is None:
+                    # 获取买家账户信息
+                    buyer_query = 'SELECT balance, password FROM "user" WHERE user_id = %s;'
+                    cur.execute(buyer_query, (buyer_id,))
+                    buyer_info = cur.fetchone()
+                    
+                    if buyer_info is None:
                         return error.error_non_exist_user_id(buyer_id)
-                    balance, buyer_password = buyer_row
+                    
+                    balance, buyer_password = buyer_info
 
-                    # 验证密码
+                    # 密码验证
                     if password != buyer_password:
                         return error.error_authorization_fail()
 
-                    # 卖家信息
-                    cur.execute(
-                        "SELECT user_id FROM user_store WHERE store_id = %s;",
-                        (store_id,)
-                    )
-                    seller_row = cur.fetchone()
-                    if seller_row is None:
+                    # 查找卖家ID
+                    seller_query = "SELECT user_id FROM user_store WHERE store_id = %s;"
+                    cur.execute(seller_query, (store_id,))
+                    seller_info = cur.fetchone()
+                    
+                    if seller_info is None:
                         return error.error_non_exist_store_id(store_id)
-                    seller_id = seller_row[0]
+                    
+                    seller_id = seller_info[0]
 
+                    # 验证卖家存在
                     if not self.user_id_exist(seller_id):
                         return error.error_non_exist_user_id(seller_id)
 
-                    # 总价
-                    cur.execute(
-                        "SELECT SUM(count * price) FROM new_order_detail WHERE order_id = %s;",
-                        (order_id,)
-                    )
+                    # 计算订单总金额
+                    price_query = "SELECT SUM(count * price) FROM new_order_detail WHERE order_id = %s;"
+                    cur.execute(price_query, (order_id,))
                     total_price = cur.fetchone()[0]
 
-                    # 买家余额
+                    # 余额检查
                     if balance < total_price:
                         return error.error_not_sufficient_funds(order_id)
 
-                    #  执行交易：从买家余额中扣除，加到卖家余额中 
-                    cur.execute(
-                        'UPDATE "user" SET balance = balance - %s '
-                        'WHERE user_id = %s AND balance >= %s',
-                        (total_price, buyer_id, total_price),
-                    )
+                    # 执行资金转移 - 从买家扣款
+                    buyer_deduct_sql = ('UPDATE "user" SET balance = balance - %s '
+                                       'WHERE user_id = %s AND balance >= %s')
+                    cur.execute(buyer_deduct_sql, (total_price, buyer_id, total_price))
+                    
                     if cur.rowcount == 0:
                         return error.error_not_sufficient_funds(order_id)
 
-                    cur.execute(
-                        'UPDATE "user" SET balance = balance + %s '
-                        'WHERE user_id = %s',
-                        (total_price, seller_id),
-                    )
+                    # 执行资金转移 - 给卖家加款
+                    seller_credit_sql = 'UPDATE "user" SET balance = balance + %s WHERE user_id = %s'
+                    cur.execute(seller_credit_sql, (total_price, seller_id))
+                    
                     if cur.rowcount == 0:
                         return error.error_non_exist_user_id(buyer_id)
 
-                    # 删除订单及订单详情
-                    cur.execute(
-                        "DELETE FROM new_order WHERE order_id = %s",
-                        (order_id,)
-                    )
+                    # 清理待处理订单记录
+                    delete_order_sql = "DELETE FROM new_order WHERE order_id = %s"
+                    cur.execute(delete_order_sql, (order_id,))
+                    
                     if cur.rowcount == 0:
                         return error.error_invalid_order_id(order_id)
 
-                    cur.execute(
-                        "DELETE FROM new_order_detail WHERE order_id = %s",
-                        (order_id,)
-                    )
+                    delete_detail_sql = "DELETE FROM new_order_detail WHERE order_id = %s"
+                    cur.execute(delete_detail_sql, (order_id,))
+                    
                     if cur.rowcount == 0:
                         return error.error_invalid_order_id(order_id)
 
-                    # 更新订单历史状态为 "已支付"
-                    cur.execute(
-                        "UPDATE order_history SET status = 'paid' WHERE order_id = %s;",
-                        (order_id,)
-                    )
+                    # 更新订单状态为已支付
+                    update_status_sql = "UPDATE order_history SET status = 'paid' WHERE order_id = %s;"
+                    cur.execute(update_status_sql, (order_id,))
+                    
                     if cur.rowcount == 0:
                         return error.error_invalid_order_id(order_id)
 
@@ -202,32 +192,29 @@ class Buyer(db_conn.DBConn):
 
         except psycopg2.Error as e:
             return 528, "{}".format(str(e))
-
         except BaseException as e:
             return 530, "{}".format(str(e))
 
     def add_funds(self, user_id, password, add_value) -> (int, str):
         try:
-            # 开始事务
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 获取用户密码
-                    cur.execute(
-                        'SELECT password FROM "user" WHERE user_id = %s', (user_id,)
-                    )
-                    row = cur.fetchone()
-                    if row is None:
+                    # 验证用户身份
+                    auth_query = 'SELECT password FROM "user" WHERE user_id = %s;'
+                    cur.execute(auth_query, (user_id,))
+                    user_record = cur.fetchone()
+                    
+                    if user_record is None:
+                        return error.error_authorization_fail()
+                    
+                    stored_password = user_record[0]
+                    if password != stored_password:
                         return error.error_authorization_fail()
 
-                    # 密码错误
-                    if row[0] != password:
-                        return error.error_authorization_fail()
-
-                    # 更新余额
-                    cur.execute(
-                        'UPDATE "user" SET balance = balance + %s WHERE user_id = %s',
-                        (add_value, user_id),
-                    )
+                    # 执行余额增加
+                    balance_update_sql = 'UPDATE "user" SET balance = balance + %s WHERE user_id = %s'
+                    cur.execute(balance_update_sql, (add_value, user_id))
+                    
                     if cur.rowcount == 0:
                         return error.error_non_exist_user_id(user_id)
 
@@ -240,28 +227,26 @@ class Buyer(db_conn.DBConn):
 
     def get_order_history(self, user_id: str) -> (int, str, [dict]):
         try:
-            # 获取用户的历史订单
-            self.cur.execute(
-                "SELECT order_id FROM order_history WHERE user_id = %s;",
-                (user_id,)
-            )
-            rows = self.cur.fetchall()
+            # 查询用户的订单历史
+            history_query = "SELECT order_id FROM order_history WHERE user_id = %s;"
+            self.cur.execute(history_query, (user_id,))
+            order_records = self.cur.fetchall()
 
-            if not rows:
+            if not order_records:
                 return error.error_non_exist_user_id(user_id) + ([],)
 
             order_list = []
-            for row in rows:
-                order_id = row[0]
+            for record in order_records:
+                order_id = record[0]
 
-                # 获取订单详情
-                self.cur.execute(
-                    "SELECT book_id, count, price FROM order_history_detail WHERE order_id = %s;",
-                    (order_id,)
-                )
+                # 获取每个订单的详细信息
+                detail_query = ("SELECT book_id, count, price FROM order_history_detail "
+                               "WHERE order_id = %s;")
+                self.cur.execute(detail_query, (order_id,))
+                
                 order_detail_list = []
-                for detail_row in self.cur.fetchall():
-                    book_id, count, price = detail_row
+                for detail_record in self.cur.fetchall():
+                    book_id, count, price = detail_record
                     order_detail = {
                         "book_id": book_id,
                         "count": count,
@@ -285,99 +270,88 @@ class Buyer(db_conn.DBConn):
 
         return 200, "ok", order_list
 
-
     def cancel_order(self, user_id: str, order_id: str) -> (int, str):
         try:
-            # 事务开始
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 检查订单是否存在
-                    cur.execute(
-                        "SELECT user_id, status FROM order_history "
-                        "WHERE order_id = %s;",
-                        (order_id,)
-                    )
-                    order_row = cur.fetchone()
-                    if order_row is None:
+                    # 验证订单存在性和权限
+                    order_check_sql = ("SELECT user_id, status FROM order_history "
+                                      "WHERE order_id = %s;")
+                    cur.execute(order_check_sql, (order_id,))
+                    order_record = cur.fetchone()
+                    
+                    if order_record is None:
                         return error.error_invalid_order_id(order_id)
                     
-                    db_user_id, status = order_row
+                    db_user_id, status = order_record
 
-                    # 检查用户权限
+                    # 权限验证
                     if db_user_id != user_id:
                         return error.error_authorization_fail()
 
-                    # 检查订单状态
+                    # 状态检查
                     if status != "pending":
                         return error.error_invalid_order_id(order_id)
 
-                    # 获取订单详情
-                    cur.execute(
-                        "SELECT book_id, count FROM new_order_detail "
-                        "WHERE order_id = %s;",
-                        (order_id,)
-                    )
+                    # 获取需要恢复的库存信息
+                    detail_query = ("SELECT book_id, count FROM new_order_detail "
+                                   "WHERE order_id = %s;")
+                    cur.execute(detail_query, (order_id,))
                     order_details = cur.fetchall()
 
-                    # 恢复库存
+                    # 恢复所有商品库存
                     for book_id, count in order_details:
-                        cur.execute(
-                            "UPDATE store SET stock_level = stock_level + %s "
-                            "WHERE book_id = %s",
-                            (count, book_id),
-                        )
+                        restore_stock_sql = ("UPDATE store SET stock_level = stock_level + %s "
+                                           "WHERE book_id = %s")
+                        cur.execute(restore_stock_sql, (count, book_id))
                     
-                    # 删除订单
-                    cur.execute(
-                        "DELETE FROM new_order WHERE order_id = %s",
-                        (order_id,)
-                    )
+                    # 删除待处理订单
+                    remove_order_sql = "DELETE FROM new_order WHERE order_id = %s"
+                    cur.execute(remove_order_sql, (order_id,))
 
-                    # 更新订单历史状态为 "已取消"
-                    cur.execute(
-                        "UPDATE order_history SET status = 'cancelled' "
-                        "WHERE order_id = %s;",
-                        (order_id,)
-                    )
+                    # 标记订单为已取消
+                    cancel_status_sql = ("UPDATE order_history SET status = 'cancelled' "
+                                        "WHERE order_id = %s;")
+                    cur.execute(cancel_status_sql, (order_id,))
+                    
             return 200, "ok"
 
         except psycopg2.Error as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
-    
 
     def receive_order(self, user_id: str, order_id: str) -> (int, str):
         try:
-            # 事务开始
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 检查order是否存在
-                    cur.execute(
-                        "SELECT user_id, status FROM order_history WHERE order_id = %s;",
-                        (order_id,)
-                    )
-                    row = cur.fetchone()
-                    if not row:
+                    # 检查订单状态和权限
+                    status_check_sql = "SELECT user_id, status FROM order_history WHERE order_id = %s;"
+                    cur.execute(status_check_sql, (order_id,))
+                    status_record = cur.fetchone()
+                    
+                    if not status_record:
                         return error.error_invalid_order_id(order_id)
 
-                    buyer_id, status = row
+                    buyer_id, status = status_record
 
-                    # 检查用户权限
+                    # 用户权限验证
                     if buyer_id != user_id:
                         return error.error_authorization_fail()
 
-                    # 订单状态是否为 shipped
+                    # 发货状态检查，只有shipped状态才能收货
                     if status != "shipped":
-                        return error.error_not_shipped(order_id)
+                        if status == "received":
+                            return error.error_invalid_status(order_id)
+                        else:
+                            return error.error_not_shipped(order_id)
 
-                    # 更改订单状态为received
-                    cur.execute(
-                        "UPDATE order_history SET status = 'received' WHERE order_id = %s;",
-                        (order_id,)
-                    )
+                    # 更新为已收货状态，确保只有shipped状态的订单能被更新
+                    receive_status_sql = "UPDATE order_history SET status = 'received' WHERE order_id = %s AND status = 'shipped';"
+                    cur.execute(receive_status_sql, (order_id,))
+                    
                     if cur.rowcount == 0:
-                        return error.error_invalid_order_id(order_id)
+                        return error.error_invalid_status(order_id)
 
             return 200, "ok"
 
@@ -385,46 +359,40 @@ class Buyer(db_conn.DBConn):
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
-        
-
     def get_collection(self, user_id):
         try:
-            ret = []
-            # 事务开始
+            collection_books = []
             with self.conn:
                 with self.conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT book_id FROM collections WHERE user_id = %s;",
-                        (user_id,)
-                    )
-                    rows = cur.fetchall()
+                    collection_query = "SELECT book_id FROM collections WHERE user_id = %s;"
+                    cur.execute(collection_query, (user_id,))
+                    book_records = cur.fetchall()
                     
-                    for row in rows:
-                        book_id = row[0]
-                        ret.append(book_id)
+                    for record in book_records:
+                        book_id = record[0]
+                        collection_books.append(book_id)
 
-            return 200, "ok," + ",".join(ret)
+            return 200, "ok," + ",".join(collection_books)
+            
         except psycopg2.Error as e:
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
 
-
     def collect_book(self, user_id, book_id):
         try:
+            # 用户存在性检查
             if not self.user_id_exist(user_id):
                 return error.error_non_exist_user_id(user_id)
-            # 事务开始
+                
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 检查order是否存在
-                    cur.execute(
-                        "INSERT INTO collections (user_id, book_id) VALUES (%s, %s);",
-                        (user_id, book_id)
-                    )
-                    added = cur.rowcount
+                    # 添加到收藏列表
+                    collect_insert_sql = "INSERT INTO collections (user_id, book_id) VALUES (%s, %s);"
+                    cur.execute(collect_insert_sql, (user_id, book_id))
+                    rows_affected = cur.rowcount
                     
-                if added == 0:
+                if rows_affected == 0:
                     return 200, "re-collect"
                 else:
                     return 200, "ok"
@@ -434,23 +402,20 @@ class Buyer(db_conn.DBConn):
         except BaseException as e:
             return 530, "{}".format(str(e))
 
-
-
     def uncollect_book(self, user_id, book_id):
         try:
+            # 用户存在性检查
             if not self.user_id_exist(user_id):
                 return error.error_non_exist_user_id(user_id)
-            # 事务开始
+                
             with self.conn:
                 with self.conn.cursor() as cur:
-                    # 检查order是否存在
-                    cur.execute(
-                        "DELETE FROM collections WHERE user_id = %s AND book_id = %s;",
-                        (user_id, book_id)
-                    )
-                    added = cur.rowcount
+                    # 从收藏列表移除
+                    uncollect_delete_sql = "DELETE FROM collections WHERE user_id = %s AND book_id = %s;"
+                    cur.execute(uncollect_delete_sql, (user_id, book_id))
+                    rows_affected = cur.rowcount
                     
-                if added == 0:
+                if rows_affected == 0:
                     return 200, "entry not found or failed to delete"
                 else:
                     return 200, "ok"

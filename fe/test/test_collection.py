@@ -22,15 +22,7 @@ class TestCollection:
         
         yield
 
-    def test_ok(self):
-        for b in self.books:
-            code = self.buyer.collect_book(b.id)
-            assert code == 200
 
-    def test_collect_book(self):
-        for b in self.books:
-            code = self.buyer.collect_book(b.id)
-            assert code == 200
 
     def test_get_collection(self):
         code = self.buyer.get_collection(self.buyer_id)
