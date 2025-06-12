@@ -3,6 +3,7 @@ from be.model import database
 class DBConn:
     def __init__(self):
         self.conn = database.get_db_conn()
+        self.cur = self.conn.cursor()
 
     def user_id_exist(self, user_id):
         with self.conn.cursor() as cur:

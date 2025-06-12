@@ -8,16 +8,16 @@ error_code = {
     516: "exist book id {}",
     517: "stock level low, book id {}",
     518: "invalid order id {}",
-    519: "not sufficient funds, order id {}",
-    520: "not shipped, order id {}",
-    521: "not paid, order id {}",
-    522: "order has been shipped, order id {}",
-    523: "order has been received, order id {}",
+    519: "not sufficient funds for order {}",
+    520: "order {} has not been shipped",
+    521: "order {} has not been paid",
+    522: "order {} status is not valid for this operation",
+    523: "",
     524: "",
     525: "",
     526: "",
     527: "",
-    528: "Database operation failed",
+    528: "database ops error",
 }
 
 
@@ -64,14 +64,8 @@ def error_not_shipped(order_id):
 def error_not_paid(order_id):
     return 521, error_code[521].format(order_id)
 
-
-def error_shipped(order_id):
+def error_invalid_status(order_id):
     return 522, error_code[522].format(order_id)
-
-
-def error_received(order_id):
-    return 523, error_code[523].format(order_id)
-
 
 def error_authorization_fail():
     return 401, error_code[401]

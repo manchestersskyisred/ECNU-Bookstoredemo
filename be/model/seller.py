@@ -206,23 +206,14 @@ class Seller(db_conn.DBConn):
         return self._execute_with_error_handling("create_store", _create_store_operation)
 
     def ship_order(self, user_id: str, store_id: str, order_id: str) -> Tuple[int, str]:
-        """发货订单"""
-        conn = None
-        try:
-            # 获取新的数据库连接
-            from be.model import database
-            conn = database.get_db_conn()
+        def _ship_order_operation():
+            # 验证前置条件
+            validation_error = self._validate_prerequisites(user_id, store_id)
+            if validation_error:
+                return validation_error
             
-            # 验证用户存在
-            if not self.user_id_exist(user_id):
-                return error.error_non_exist_user_id(user_id)
-            
-            # 验证用户是否拥有该店铺
-            if not self._check_store_ownership(user_id, store_id):
-                return error.error_authorization_fail()
-            
-            with conn:
-                with conn.cursor() as cur:
+            with self.conn:
+                with self.conn.cursor() as cur:
                     # 检查订单状态
                     cur.execute(
                         "SELECT status, store_id FROM order_history WHERE order_id = %s",
@@ -238,33 +229,36 @@ class Seller(db_conn.DBConn):
                     if order_store_id != store_id:
                         return error.error_authorization_fail()
                     
-                    # 检查并更新订单状态 - 使用原子操作
+                    # 检查订单状态，只有paid状态才能发货
+                    if order_status != 'paid':
+                        if order_status == 'shipped':
+                            return error.error_invalid_status(order_id)
+                        else:
+                            return error.error_not_paid(order_id)
+                    
+                    # 更新订单状态，确保只有paid状态的订单能被更新
                     cur.execute(
                         "UPDATE order_history SET status = 'shipped' WHERE order_id = %s AND status = 'paid'",
                         (order_id,)
                     )
                     
                     if cur.rowcount == 0:
-                        # 更新失败，检查原因
-                        if order_status == 'shipped':
-                            return error.error_shipped(order_id)
-                        elif order_status != 'paid':
-                            return error.error_not_paid(order_id)
-                        else:
-                            return error.error_invalid_order_id(order_id)
+                        return error.error_invalid_status(order_id)
+                    
+                    # 同时更新新的orders表
+                    try:
+                        cur.execute("""
+                            UPDATE orders 
+                            SET status = 'shipped', updated_at = CURRENT_TIMESTAMP
+                            WHERE order_id = %s AND status = 'paid'
+                        """, (order_id,))
+                    except psycopg2.Error:
+                        # 如果新表不存在，忽略错误
+                        pass
             
             return 200, "ok"
         
-        except psycopg2.Error as e:
-            self.logger.error(f"ship_order failed with database error: {e}")
-            return 528, f"Database error: {str(e)}"
-        except Exception as e:
-            self.logger.error(f"ship_order failed with unexpected error: {e}")
-            return 530, f"Unexpected error: {str(e)}"
-        finally:
-            if conn:
-                conn.close()
-
+        return self._execute_with_error_handling("ship_order", _ship_order_operation)
     def get_store_books(self, user_id: str, store_id: str) -> Tuple[int, str, list]:
         """获取店铺所有书籍列表"""
         def _get_store_books_operation():

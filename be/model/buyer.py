@@ -227,47 +227,48 @@ class Buyer(db_conn.DBConn):
 
     def get_order_history(self, user_id: str) -> (int, str, [dict]):
         try:
-            with self.conn:
-                with self.conn.cursor() as cur:
-                    # 查询用户的订单历史
-                    history_query = "SELECT order_id FROM order_history WHERE user_id = %s;"
-                    cur.execute(history_query, (user_id,))
-                    order_records = cur.fetchall()
+            # 查询用户的订单历史
+            history_query = "SELECT order_id FROM order_history WHERE user_id = %s;"
+            self.cur.execute(history_query, (user_id,))
+            order_records = self.cur.fetchall()
 
-                    if not order_records:
-                        return error.error_non_exist_user_id(user_id) + ([],)
+            if not order_records:
+                return error.error_non_exist_user_id(user_id) + ([],)
 
-                    order_list = []
-                    for record in order_records:
-                        order_id = record[0]
+            order_list = []
+            for record in order_records:
+                order_id = record[0]
 
-                        # 获取每个订单的详细信息
-                        detail_query = ("SELECT book_id, count, price FROM order_history_detail "
-                                       "WHERE order_id = %s;")
-                        cur.execute(detail_query, (order_id,))
-                        
-                        order_detail_list = []
-                        for detail_record in cur.fetchall():
-                            book_id, count, price = detail_record
-                            order_detail = {
-                                "book_id": book_id,
-                                "count": count,
-                                "price": price
-                            }
-                            order_detail_list.append(order_detail)
+                # 获取每个订单的详细信息
+                detail_query = ("SELECT book_id, count, price FROM order_history_detail "
+                               "WHERE order_id = %s;")
+                self.cur.execute(detail_query, (order_id,))
+                
+                order_detail_list = []
+                for detail_record in self.cur.fetchall():
+                    book_id, count, price = detail_record
+                    order_detail = {
+                        "book_id": book_id,
+                        "count": count,
+                        "price": price
+                    }
+                    order_detail_list.append(order_detail)
 
-                        order_info = {
-                            "order_id": order_id,
-                            "order_detail": order_detail_list
-                        }
-                        order_list.append(order_info)
-
-            return 200, "ok", order_list
+                order_info = {
+                    "order_id": order_id,
+                    "order_detail": order_detail_list
+                }
+                order_list.append(order_info)
 
         except psycopg2.Error as e:
             return 528, "{}".format(str(e)), []
         except BaseException as e:
             return 530, "{}".format(str(e)), []
+        finally:
+            self.cur.close()
+            self.conn.close()
+
+        return 200, "ok", order_list
 
     def cancel_order(self, user_id: str, order_id: str) -> (int, str):
         try:
@@ -338,18 +339,19 @@ class Buyer(db_conn.DBConn):
                     if buyer_id != user_id:
                         return error.error_authorization_fail()
 
-                    # 发货状态检查
-                    if status == "received":
-                        return error.error_received(order_id)
+                    # 发货状态检查，只有shipped状态才能收货
                     if status != "shipped":
-                        return error.error_not_shipped(order_id)
+                        if status == "received":
+                            return error.error_invalid_status(order_id)
+                        else:
+                            return error.error_not_shipped(order_id)
 
-                    # 更新为已收货状态
-                    receive_status_sql = "UPDATE order_history SET status = 'received' WHERE order_id = %s;"
+                    # 更新为已收货状态，确保只有shipped状态的订单能被更新
+                    receive_status_sql = "UPDATE order_history SET status = 'received' WHERE order_id = %s AND status = 'shipped';"
                     cur.execute(receive_status_sql, (order_id,))
                     
                     if cur.rowcount == 0:
-                        return error.error_invalid_order_id(order_id)
+                        return error.error_invalid_status(order_id)
 
             return 200, "ok"
 
@@ -357,7 +359,6 @@ class Buyer(db_conn.DBConn):
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
-
     def get_collection(self, user_id):
         try:
             collection_books = []

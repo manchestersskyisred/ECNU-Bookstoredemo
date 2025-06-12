@@ -59,7 +59,6 @@ class TestShipReceive:
         auth.unregister(self.seller_id, self.password)
         auth.unregister(self.buyer_id, self.password)
 
-
     def test_ship_ok(self):
         code = self.seller.ship_order(self.store_id, self.order_id[0])
         assert code == 200
@@ -79,15 +78,21 @@ class TestShipReceive:
         assert code != 200
 
     def test_error_seller_id(self):
+        # 修改seller_id来测试错误的seller_id
+        original_seller_id = self.seller.seller_id
         self.seller.seller_id = self.seller.seller_id + "_x"
         code = self.seller.ship_order(self.store_id, self.order_id[0])
+        self.seller.seller_id = original_seller_id  # 恢复原值
         assert code != 200
 
     def test_error_buyer_id(self):
         code = self.seller.ship_order(self.store_id, self.order_id[0])
         assert code == 200
+        # 修改buyer的user_id来测试错误的buyer_id
+        original_user_id = self.buyer.user_id
         self.buyer.user_id = self.buyer.user_id + "_x"
         code = self.buyer.receive_order(self.order_id[0])
+        self.buyer.user_id = original_user_id  # 恢复原值
         assert code != 200
 
     def test_ship_not_pay(self):
