@@ -424,3 +424,39 @@ class Buyer(db_conn.DBConn):
             return 528, "{}".format(str(e))
         except BaseException as e:
             return 530, "{}".format(str(e))
+
+    def get_user_orders(self, user_id: str, order_status: str = "") -> (int, str, list):
+        try:
+            # 用户存在性检查
+            if not self.user_id_exist(user_id):
+                return error.error_non_exist_user_id(user_id) + ([],)
+
+            orders = []
+            with self.conn:
+                with self.conn.cursor() as cur:
+                    if order_status:
+                        # 查询指定状态的订单
+                        query = "SELECT order_id, store_id, status FROM order_history WHERE user_id = %s AND status = %s;"
+                        cur.execute(query, (user_id, order_status))
+                    else:
+                        # 查询所有订单
+                        query = "SELECT order_id, store_id, status FROM order_history WHERE user_id = %s;"
+                        cur.execute(query, (user_id,))
+                    
+                    order_records = cur.fetchall()
+                    
+                    for record in order_records:
+                        order_id, store_id, status = record
+                        order_info = {
+                            "order_id": order_id,
+                            "store_id": store_id,
+                            "status": status
+                        }
+                        orders.append(order_info)
+
+            return 200, "ok", orders
+
+        except psycopg2.Error as e:
+            return 528, "{}".format(str(e)), []
+        except BaseException as e:
+            return 530, "{}".format(str(e)), []

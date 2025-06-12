@@ -91,3 +91,12 @@ def uncollect_book():
     b = Buyer()
     code, message = b.uncollect_book(user_id = user_id, book_id = book_id)
     return jsonify({"message": message}), code
+
+
+@bp_buyer.route("/get_user_orders", methods=["POST"])
+def get_user_orders():
+    user_id = request.json.get("user_id")
+    order_status = request.json.get("status", "")
+    b = Buyer()
+    code, message, orders = b.get_user_orders(user_id, order_status)
+    return jsonify({"message": message, "orders": orders}), code
