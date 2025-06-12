@@ -16,9 +16,9 @@ class database:
 
             # 清空表格数据（保持向后兼容）
             try:
-                cursor.execute("TRUNCATE TABLE new_order_detail, new_order, order_history_detail, order_history, store, user_store, \"user\", store_info, store_inventory, book_catalog, orders, order_items, user_favorites, payment_history, inventory_logs RESTART IDENTITY CASCADE")
+                cursor.execute("TRUNCATE TABLE new_order_detail, new_order, order_history_detail, order_history, store, user_store, \"user\", collections RESTART IDENTITY CASCADE")
             except psycopg2.Error:
-                # 如果某些表不存在，忽略错误
+                # 如果表不存在，忽略错误
                 pass
 
             # 创建用户表（优化版本）
@@ -200,10 +200,13 @@ class database:
             conn.commit()
         except psycopg2.Error as e:
             logging.error(e)
-            conn.rollback()
+            if 'conn' in locals():
+                conn.rollback()
         finally:
-            conn.close()
-            cursor.close()
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
 
     def get_db_conn(self) -> psycopg2.extensions.connection:
         conn = psycopg2.connect(database="bookstore2", user="kerwinlv", password="123456") 
